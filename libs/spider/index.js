@@ -1,35 +1,52 @@
-const puppeteer = require('puppeteer');
+const dotenv = require('dotenv')
+dotenv.config()
+
+// const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra')
+
+// Add stealth plugin and use defaults (all tricks to hide puppeteer usage)
+const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+puppeteer.use(StealthPlugin())
+
+// add recaptcha plugin and provide it your 2captcha token (= their apiKey)
+// 2captcha is the builtin solution provider but others would work as well.
+// Please note: You need to add funds to your 2captcha account for this to work
+const RecaptchaPlugin = require('puppeteer-extra-plugin-recaptcha')
+puppeteer.use(
+	RecaptchaPlugin({
+		provider: {
+			id: '2captcha',
+			token: process.env.TOKEN_2CAPTCHA
+		},
+		visualFeedback: true // colorize reCAPTCHAs (violet = detected, green = solved)
+	})
+)
+
 // const useProxy = require('puppeteer-page-proxy');
 
 const proxyApi = require('./../proxyApi')
 
 const { PROXY_IP, PROXY_PORT, PROXY_LOGIN, PROXY_PASSWORD } = process.env
 
-let Browser = null
-let Page = null
-
 const Spider = {
 	login: null,
 	password: null,
 
+	browser: null,
+	page: null,
+
 	async open(url) {
-		Browser = Browser || await puppeteer.launch({
-			headless: true,
+		this.browser = this.browser || await puppeteer.launch({
+			headless: false,
 			args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'],
-			// defaultViewport : { width : 1280, height : 720 }
+			defaultViewport : { width : 1280, height : 720 }
 		});
-		Page = await Browser.newPage();
-		await Page.setExtraHTTPHeaders({
-			'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-			'accept-encoding': 'gzip, deflate, br',
-			'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-			'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36'
-		})
+		this.page = await this.browser.newPage();
 
-		Page.once('load', () => console.log('Page loaded!'));
+		this.page.once('load', () => console.log('Page loaded!'));
 
-		// await Page.setRequestInterception(true);
-		// Page.on('request', async (req) => {
+		// await this.page.setRequestInterception(true);
+		// this.page.on('request', async (req) => {
 		// 	if (req.isInterceptResolutionHandled()) return;
 		//
 		// 	const url = req.url()
@@ -57,7 +74,7 @@ const Spider = {
 		// 	await req.continue()
 		// });
 		//
-		// Page.on('response', async (res) => {
+		// this.page.on('response', async (res) => {
 		// 	if (res.url().includes('authorizationserver/oauth/token?client_id=merchantcabinet')) {
 		// 		const body = await res.json()
 		// 		if (body) {
@@ -67,9 +84,19 @@ const Spider = {
 		// })
 
 		try {
-			await Page.goto(url, { waitUntil: 'networkidle2', timeout: 50000 })
+			await this.page.goto(url, { waitUntil: 'networkidle2', timeout: 50000 })
+
+			// await Spider.wait(5000)
+			// const result = await this.page.solveRecaptchas()
+			// await Spider.wait(5000)
+
+			// if (result.captchas.length === 0) {
+			// 	await Spider.wait(60000)
+			// }
+			//
+			// console.log('Captcha Result', result)
 		} catch (e) {
-			await proxyApi.updateIp()
+			// await proxyApi.updateIp()
 
 			console.error('Page.goto, line 74', e)
 			await Spider.wait(1000)
@@ -81,7 +108,7 @@ const Spider = {
 	},
 
 	async url(url) {
-		if (Browser === null) {
+		if (this.browser === null) {
 			const result = await Spider.open(url)
 			if (result === false) {
 				return false
@@ -92,7 +119,7 @@ const Spider = {
 		}
 
 		try {
-			await Page.goto(url, { waitUntil: 'networkidle2' })
+			await this.page.goto(url, { waitUntil: 'networkidle2' })
 		} catch (e) {
 			await proxyApi.updateIp()
 
@@ -104,8 +131,12 @@ const Spider = {
 		return true
 	},
 
+	solveRecaptchas() {
+		return this.page.solveRecaptchas()
+	},
+
 	getUrl() {
-		return Page.url()
+		return this.page.url()
 	},
 
 	async getElement(args, rootElement = null) {
@@ -113,7 +144,7 @@ const Spider = {
 		if (rootElement) {
 			element = await rootElement.$(args)
 		} else {
-			element = await Page.$(args)
+			element = await this.page.$(args)
 		}
 
 		return element
@@ -124,18 +155,18 @@ const Spider = {
 		if (rootElement) {
 			element = await rootElement.$$(args)
 		} else {
-			element = await Page.$$(args)
+			element = await this.page.$$(args)
 		}
 
 		return element
 	},
 
 	async getAttribute(element, attr) {
-		return await Page.evaluate((el, attr) => el && el.getAttribute(attr), element, attr);
+		return await this.page.evaluate((el, attr) => el && el.getAttribute(attr), element, attr);
 	},
 
 	async getText(element) {
-		return Page.evaluate(el => el && el.textContent, element)
+		return this.page.evaluate(el => el && el.textContent, element)
 	},
 
 	async click(elem) {
@@ -143,31 +174,31 @@ const Spider = {
 	},
 
 	async waitForSelector(arg, options = {}) {
-		await Page.waitForSelector(arg, options)
+		await this.page.waitForSelector(arg, options)
 	},
 
 	async setValue(arg, value) {
-		await Page.waitForSelector(arg);
-		const el = await Page.$(arg)
+		await this.page.waitForSelector(arg);
+		const el = await this.page.$(arg)
 
-		return await Page.evaluate((el, value) => el.value = value, el, value)
+		return await this.page.evaluate((el, value) => el.value = value, el, value)
 	},
 
 	execFunction(fn, options, payload) {
-		return Page.waitForFunction(fn, options, payload)
+		return this.page.waitForFunction(fn, options, payload)
 	},
 
 	async close() {
-		if (Browser) {
-			await Browser.close()
+		if (this.browser) {
+			await this.browser.close()
 		}
 
-		Browser = null
-		Page = null
+		this.browser = null
+		this.page = null
 	},
 
 	async wait(ms) {
-		await Page.waitForTimeout(ms)
+		await this.page.waitForTimeout(ms)
 	},
 }
 
